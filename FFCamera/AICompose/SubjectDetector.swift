@@ -48,6 +48,15 @@ enum SubjectDetector {
 
     static func classifyScene(in pixelBuffer: CVPixelBuffer) -> [String] {
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+        return classify(with: handler)
+    }
+
+    static func classifyScene(in cgImage: CGImage) -> [String] {
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        return classify(with: handler)
+    }
+
+    private static func classify(with handler: VNImageRequestHandler) -> [String] {
         let request = VNClassifyImageRequest()
         do {
             try handler.perform([request])

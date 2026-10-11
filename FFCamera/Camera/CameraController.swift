@@ -27,6 +27,7 @@ final class CameraController: NSObject, ObservableObject {
     let session = AVCaptureSession()
 
     private let sessionQueue = DispatchQueue(label: "com.ffcamera.session")
+    private let videoQueue = DispatchQueue(label: "com.ffcamera.video", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private weak var frameReceiver: AVCaptureVideoDataOutputSampleBufferDelegate?
@@ -89,7 +90,7 @@ final class CameraController: NSObject, ObservableObject {
         frameReceiver = receiver
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.videoOutput.setSampleBufferDelegate(self.frameReceiver, queue: .main)
+            self.videoOutput.setSampleBufferDelegate(self.frameReceiver, queue: self.videoQueue)
         }
     }
 
@@ -127,7 +128,7 @@ final class CameraController: NSObject, ObservableObject {
                connection.isVideoRotationAngleSupported(90) {
                 connection.videoRotationAngle = 90
             }
-            videoOutput.setSampleBufferDelegate(frameReceiver, queue: .main)
+            videoOutput.setSampleBufferDelegate(frameReceiver, queue: videoQueue)
         }
 
         session.commitConfiguration()
@@ -244,15 +245,16 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
                 var didCompose = false
                 if aiCompose,
                    let ci = CIImage(image: image, options: [.applyOrientationProperty: true]) {
-                    let result = AutoComposer.composed(ci)
-                    if result.didCrop,
-                       let baked = FilterEngine.shared.context.createCGImage(result.image, from: result.image.extent) {
-                        working = UIImage(cgImage: baked)
-                        didCompose = true
+                    let composed = AutoComposer.composed(ci)
+                    didCompose = composed.didCrop
+                    let filtered = FilterEngine.shared.apply(composed.image, spec: spec, intensity: intensity)
+                    if let cg = FilterEngine.shared.context.createCGImage(filtered, from: filtered.extent) {
+                        working = UIImage(cgImage: cg)
                     }
+                } else {
+                    working = FilterEngine.shared.apply(image, spec: spec, intensity: intensity)
                 }
-                let filtered = FilterEngine.shared.apply(working, spec: spec, intensity: intensity)
-                PhotoLibrarySaver.save(filtered) { result in
+                PhotoLibrarySaver.save(working) { result in
                     Task { @MainActor in
                         switch result {
                         case .success:

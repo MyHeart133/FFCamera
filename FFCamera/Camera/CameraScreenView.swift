@@ -40,10 +40,7 @@ struct CameraScreenView: View {
             renderer.mirroredPreview = value
         }
         .onChange(of: camera.aiComposeEnabled) { _, value in
-            analyzer.isEnabled = value
-            if !value {
-                analyzer.reset()
-            }
+            analyzer.setEnabled(value)
         }
         .onChange(of: camera.lastSavedMessage) { _, message in
             guard let message else { return }

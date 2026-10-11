@@ -7,8 +7,12 @@ enum AutoComposer {
     /// - returns: 裁剪后的图像与是否发生裁剪
     static func composed(_ image: CIImage) -> (image: CIImage, didCrop: Bool) {
         let extent = image.extent
-        guard extent.width > 1, extent.height > 1,
-              let cg = FilterEngine.shared.context.createCGImage(image, from: extent),
+        guard extent.width > 1, extent.height > 1 else { return (image, false) }
+
+        // 用缩小图做主体检测(构图框与分辨率无关),避免全图 Vision。
+        let scale = min(1.0, 1024.0 / max(extent.width, extent.height))
+        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cg = FilterEngine.shared.context.createCGImage(small, from: small.extent),
               let subject = SubjectDetector.detectSubject(in: cg),
               let crop = CompositionEngine.autoCropRect(subjectBox: subject, imageSize: extent.size)
         else { return (image, false) }
