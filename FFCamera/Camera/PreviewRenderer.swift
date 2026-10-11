@@ -12,8 +12,10 @@ final class PreviewRenderer: NSObject, ObservableObject {
     private let ciContext: CIContext?
     private weak var view: MTKView?
 
-    /// 相机控制器(读取滤镜与镜像状态)。
-    weak var camera: CameraController?
+    // 界面同步的状态(主线程读写)。
+    var activeFilterSpec: FilterSpec?
+    var filterIntensityValue: CGFloat = 1.0
+    var mirroredPreview = false
 
     override init() {
         let metalDevice = MTLCreateSystemDefaultDevice()
@@ -48,13 +50,11 @@ extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         var image = CIImage(cvPixelBuffer: pixelBuffer)
 
-        if camera?.isFrontCamera == true {
+        if mirroredPreview {
             image = image.oriented(.upMirrored)
         }
 
-        let spec = camera?.activeFilter
-        let intensity = camera?.filterIntensity ?? 1.0
-        image = FilterEngine.shared.apply(image, spec: spec, intensity: intensity)
+        image = FilterEngine.shared.apply(image, spec: activeFilterSpec, intensity: filterIntensityValue)
 
         guard let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer() else { return }

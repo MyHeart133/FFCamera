@@ -21,11 +21,20 @@ struct CameraScreenView: View {
         }
         .statusBarHidden(true)
         .onAppear {
-            renderer.camera = camera
+            syncRendererState()
             camera.attachFrameReceiver(renderer)
             camera.startIfAuthorized()
         }
         .onDisappear { camera.stop() }
+        .onChange(of: camera.activeFilter) { _, value in
+            renderer.activeFilterSpec = value
+        }
+        .onChange(of: camera.filterIntensity) { _, value in
+            renderer.filterIntensityValue = value
+        }
+        .onChange(of: camera.isFrontCamera) { _, value in
+            renderer.mirroredPreview = value
+        }
         .onChange(of: camera.lastSavedMessage) { _, message in
             guard let message else { return }
             withAnimation(.easeOut(duration: 0.15)) { toast = message }
@@ -41,6 +50,12 @@ struct CameraScreenView: View {
         case .running, .configuring: return true
         default: return false
         }
+    }
+
+    private func syncRendererState() {
+        renderer.activeFilterSpec = camera.activeFilter
+        renderer.filterIntensityValue = camera.filterIntensity
+        renderer.mirroredPreview = camera.isFrontCamera
     }
 
     // MARK: - 取景
