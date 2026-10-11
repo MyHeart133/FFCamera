@@ -2,15 +2,21 @@ import AVFoundation
 import CoreImage
 import MetalKit
 
-/// 实时滤镜预览:相机帧 → LUT 滤镜 → Metal 渲染。
-/// 帧回调在专用视频队列(不占主线程);仅最终绘制切回主线程,且带丢帧背压。
+/// 实时滤镜预览。
+/// - 帧回调(视频队列):只做轻量滤镜图构建,并保存"最新一帧"(覆盖式,无排队)。
+/// - 绘制(主线程):完全由 MTKView 自己的 30fps 显示循环驱动,在系统保证的时机获取
+///   drawable。不存在跨线程争抢 drawable,不存在逐帧任务积压;
+///   渲染侧任何时刻最多保留一帧图像及其缓冲。
 final class PreviewRenderer: NSObject, ObservableObject {
 
     let device: MTLDevice?
 
     private let commandQueue: MTLCommandQueue?
     private let ciContext: CIContext?
-    private weak var view: MTKView?
+
+    private let stateLock = NSLock()
+    private var latestImage: CIImage?
+    private var hasFreshFrame = false
 
     // 界面同步的状态(主线程写,读宽容)。
     var activeFilterSpec: FilterSpec?
@@ -19,9 +25,6 @@ final class PreviewRenderer: NSObject, ObservableObject {
 
     /// 每帧回调(供 AI 分析消费;视频队列调用)。
     var onFrame: ((CVPixelBuffer) -> Void)?
-
-    /// 渲染忙碌标记(仅主线程访问):忙时丢帧,防止排队窒息。
-    private var renderBusy = false
 
     override init() {
         let metalDevice = MTLCreateSystemDefaultDevice()
@@ -38,10 +41,6 @@ final class PreviewRenderer: NSObject, ObservableObject {
     var isAvailable: Bool {
         device != nil && commandQueue != nil && ciContext != nil
     }
-
-    func attach(view: MTKView) {
-        self.view = view
-    }
 }
 
 extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -51,20 +50,21 @@ extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // 轻量工作留在视频队列:滤镜图构建
+        // 轻量:包 image、套滤镜图(未选滤镜时恒等),不做渲染。
         var image = CIImage(cvPixelBuffer: pixelBuffer)
         if mirroredPreview {
             image = image.oriented(.upMirrored)
         }
         image = FilterEngine.shared.apply(image, spec: activeFilterSpec, intensity: filterIntensityValue)
 
-        // AI 分析(内部自动降采样 + 节流,任意线程可调)
+        // AI 分析(内部降采样 + 节流,任意线程可调)。
         onFrame?(pixelBuffer)
 
-        // 绘制回主线程;忙时丢弃本帧(背压)
-        DispatchQueue.main.async { [weak self] in
-            self?.render(image)
-        }
+        // 覆盖式保存最新帧:旧帧(及其缓冲)立即释放,不积压。
+        stateLock.lock()
+        latestImage = image
+        hasFreshFrame = true
+        stateLock.unlock()
     }
 }
 
@@ -72,21 +72,19 @@ extension PreviewRenderer: MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-    func draw(in view: MTKView) {}
-}
+    /// MTKView 显示循环(主线程,30fps);没有新帧则跳过。
+    func draw(in view: MTKView) {
+        stateLock.lock()
+        let image = latestImage
+        let fresh = hasFreshFrame
+        hasFreshFrame = false
+        stateLock.unlock()
 
-private extension PreviewRenderer {
-
-    /// 主线程:绘制一帧;忙碌中或视图不在窗口时直接丢弃。
-    func render(_ image: CIImage) {
-        guard !renderBusy,
-              let view, view.window != nil,
+        guard fresh, let image,
+              view.window != nil,
               let commandQueue, let ciContext,
               let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-
-        renderBusy = true
-        defer { renderBusy = false }
 
         let size = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let filled = Self.aspectFill(image, into: size)
@@ -102,7 +100,7 @@ private extension PreviewRenderer {
         commandBuffer.commit()
     }
 
-    static func aspectFill(_ image: CIImage, into size: CGSize) -> CIImage {
+    private static func aspectFill(_ image: CIImage, into size: CGSize) -> CIImage {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0,
               size.width > 0, size.height > 0 else { return image }

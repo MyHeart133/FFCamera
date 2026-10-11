@@ -1,7 +1,7 @@
 import SwiftUI
 import MetalKit
 
-/// Metal 滤镜预览视图(手动渲染模式,由 PreviewRenderer 驱动)。
+/// Metal 滤镜预览视图:渲染完全由 MTKView 自身的 30fps 显示循环驱动。
 struct FilteredPreviewView: UIViewRepresentable {
 
     let renderer: PreviewRenderer
@@ -10,10 +10,10 @@ struct FilteredPreviewView: UIViewRepresentable {
         let view = MTKView(frame: .zero, device: renderer.device)
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = false
-        view.isPaused = true
+        view.isPaused = false
         view.enableSetNeedsDisplay = false
+        view.preferredFramesPerSecond = 30
         view.delegate = renderer
-        renderer.attach(view: view)
         return view
     }
 

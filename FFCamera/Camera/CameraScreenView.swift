@@ -28,6 +28,9 @@ struct CameraScreenView: View {
             }
             camera.attachFrameReceiver(renderer)
             camera.startIfAuthorized()
+            DispatchQueue.global(qos: .utility).async {
+                FilterThumbnailProvider.warmUp()
+            }
         }
         .onDisappear { camera.stop() }
         .onChange(of: camera.activeFilter) { _, value in

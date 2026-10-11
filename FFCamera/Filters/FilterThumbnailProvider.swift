@@ -25,6 +25,14 @@ enum FilterThumbnailProvider {
         return result
     }
 
+    /// 预热全部缩略图(后台线程调用,避免首次展示时主线程停顿)。
+    static func warmUp() {
+        _ = thumbnail(for: nil)
+        for spec in FilterCatalog.all {
+            _ = thumbnail(for: spec)
+        }
+    }
+
     /// 上暖下冷的渐变样图,便于分辨调色差异。
     private static func baseImage(side: CGFloat) -> UIImage {
         let size = CGSize(width: side, height: side)
