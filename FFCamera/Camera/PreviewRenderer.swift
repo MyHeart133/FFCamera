@@ -1,0 +1,104 @@
+import AVFoundation
+import CoreImage
+import MetalKit
+
+/// 实时滤镜预览:相机帧 → LUT 滤镜 → Metal 渲染到 MTKView。
+/// 帧回调与渲染都在主队列(MTKView 需要主线程访问)。
+final class PreviewRenderer: NSObject, ObservableObject {
+
+    let device: MTLDevice?
+
+    private let commandQueue: MTLCommandQueue?
+    private let ciContext: CIContext?
+    private weak var view: MTKView?
+
+    /// 相机控制器(读取滤镜与镜像状态)。
+    weak var camera: CameraController?
+
+    override init() {
+        let metalDevice = MTLCreateSystemDefaultDevice()
+        device = metalDevice
+        commandQueue = metalDevice?.makeCommandQueue()
+        if let metalDevice {
+            ciContext = CIContext(mtlDevice: metalDevice)
+        } else {
+            ciContext = nil
+        }
+        super.init()
+    }
+
+    var isAvailable: Bool {
+        device != nil && commandQueue != nil && ciContext != nil
+    }
+
+    func attach(view: MTKView) {
+        self.view = view
+    }
+}
+
+extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
+
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let ciContext,
+              let commandQueue,
+              let view,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        var image = CIImage(cvPixelBuffer: pixelBuffer)
+
+        if camera?.isFrontCamera == true {
+            image = image.oriented(.upMirrored)
+        }
+
+        let spec = camera?.activeFilter
+        let intensity = camera?.filterIntensity ?? 1.0
+        image = FilterEngine.shared.apply(image, spec: spec, intensity: intensity)
+
+        guard let drawable = view.currentDrawable,
+              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+
+        let size = CGSize(width: drawable.texture.width, height: drawable.texture.height)
+        let filled = Self.aspectFill(image, into: size)
+
+        ciContext.render(
+            filled,
+            to: drawable.texture,
+            commandBuffer: commandBuffer,
+            bounds: CGRect(origin: .zero, size: size),
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        )
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+}
+
+extension PreviewRenderer: MTKViewDelegate {
+
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+    func draw(in view: MTKView) {}
+}
+
+private extension PreviewRenderer {
+
+    static func aspectFill(_ image: CIImage, into size: CGSize) -> CIImage {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0,
+              size.width > 0, size.height > 0 else { return image }
+        let scale = max(size.width / extent.width, size.height / extent.height)
+        let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let cropRect = CGRect(
+            x: scaled.extent.origin.x + (scaled.extent.width - size.width) / 2,
+            y: scaled.extent.origin.y + (scaled.extent.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+        let cropped = scaled.cropped(to: cropRect)
+        return cropped.transformed(by: CGAffineTransform(
+            translationX: -cropped.extent.origin.x,
+            y: -cropped.extent.origin.y
+        ))
+    }
+}

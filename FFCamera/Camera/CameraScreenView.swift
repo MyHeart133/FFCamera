@@ -5,6 +5,7 @@ import UIKit
 struct CameraScreenView: View {
 
     @StateObject private var camera = CameraController()
+    @StateObject private var renderer = PreviewRenderer()
     @State private var showGrid = true
     @State private var pinchBase: CGFloat = 1
     @State private var toast: String?
@@ -19,7 +20,11 @@ struct CameraScreenView: View {
             }
         }
         .statusBarHidden(true)
-        .onAppear { camera.startIfAuthorized() }
+        .onAppear {
+            renderer.camera = camera
+            camera.attachFrameReceiver(renderer)
+            camera.startIfAuthorized()
+        }
         .onDisappear { camera.stop() }
         .onChange(of: camera.lastSavedMessage) { _, message in
             guard let message else { return }
@@ -45,17 +50,7 @@ struct CameraScreenView: View {
         switch camera.status {
         case .running, .configuring:
             ZStack {
-                CameraPreviewView(session: camera.session, mirrored: camera.isFrontCamera)
-                    .ignoresSafeArea()
-                    .gesture(
-                        MagnifyGesture(minimumScaleDelta: 0.01)
-                            .onChanged { value in
-                                camera.setZoom(pinchBase * value.magnification)
-                            }
-                            .onEnded { _ in
-                                pinchBase = camera.zoomFactor
-                            }
-                    )
+                previewSurface
                 if showGrid {
                     GridOverlay().ignoresSafeArea()
                 }
@@ -76,14 +71,39 @@ struct CameraScreenView: View {
         }
     }
 
+    @ViewBuilder
+    private var previewSurface: some View {
+        if renderer.isAvailable {
+            FilteredPreviewView(renderer: renderer)
+                .ignoresSafeArea()
+                .gesture(pinchGesture)
+        } else {
+            CameraPreviewView(session: camera.session, mirrored: camera.isFrontCamera)
+                .ignoresSafeArea()
+                .gesture(pinchGesture)
+        }
+    }
+
+    private var pinchGesture: some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.01)
+            .onChanged { value in
+                camera.setZoom(pinchBase * value.magnification)
+            }
+            .onEnded { _ in
+                pinchBase = camera.zoomFactor
+            }
+    }
+
     // MARK: - 控件
 
     private var controlLayer: some View {
         VStack {
             topBar
             Spacer()
+            FilterStripView(camera: camera)
+                .padding(.bottom, 12)
             zoomChips
-                .padding(.bottom, 14)
+                .padding(.bottom, 12)
             bottomBar
         }
         .padding(.horizontal, 20)

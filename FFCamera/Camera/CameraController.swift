@@ -19,11 +19,15 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var zoomFactor: CGFloat = 1.0
     @Published private(set) var maxZoomFactor: CGFloat = 1.0
     @Published var lastSavedMessage: String?
+    @Published var activeFilter: FilterSpec?
+    @Published var filterIntensity: CGFloat = 1.0
 
     let session = AVCaptureSession()
 
     private let sessionQueue = DispatchQueue(label: "com.ffcamera.session")
     private let photoOutput = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private weak var frameReceiver: AVCaptureVideoDataOutputSampleBufferDelegate?
     private var videoInput: AVCaptureDeviceInput?
     private var currentDevice: AVCaptureDevice?
     private var position: AVCaptureDevice.Position = .back
@@ -78,6 +82,15 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    /// 挂载实时帧接收器(Metal 滤镜预览)。
+    func attachFrameReceiver(_ receiver: AVCaptureVideoDataOutputSampleBufferDelegate) {
+        frameReceiver = receiver
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoOutput.setSampleBufferDelegate(self.frameReceiver, queue: .main)
+        }
+    }
+
     // MARK: - 会话配置
 
     private func configureSession() {
@@ -103,6 +116,18 @@ final class CameraController: NSObject, ObservableObject {
             return
         }
         session.addOutput(photoOutput)
+
+        videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        if session.canAddOutput(videoOutput) {
+            session.addOutput(videoOutput)
+            if let connection = videoOutput.connection(with: .video),
+               connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+            videoOutput.setSampleBufferDelegate(frameReceiver, queue: .main)
+        }
+
         session.commitConfiguration()
 
         let maxZoom = maxZoomFactor(for: device)
@@ -142,6 +167,10 @@ final class CameraController: NSObject, ObservableObject {
                 self.session.addInput(newInput)
                 self.videoInput = newInput
                 self.currentDevice = device
+                if let connection = self.videoOutput.connection(with: .video),
+                   connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
+                }
                 self.session.commitConfiguration()
                 let maxZoom = self.maxZoomFactor(for: device)
                 Task { @MainActor in
@@ -204,13 +233,20 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
             Task { @MainActor in self.lastSavedMessage = "照片数据无效" }
             return
         }
-        PhotoLibrarySaver.save(image) { result in
-            Task { @MainActor in
-                switch result {
-                case .success:
-                    self.lastSavedMessage = "已保存到相册"
-                case .failure(let error):
-                    self.lastSavedMessage = "保存失败:\(error.localizedDescription)"
+        Task { @MainActor in
+            let spec = self.activeFilter
+            let intensity = self.filterIntensity
+            DispatchQueue.global(qos: .userInitiated).async {
+                let filtered = FilterEngine.shared.apply(image, spec: spec, intensity: intensity)
+                PhotoLibrarySaver.save(filtered) { result in
+                    Task { @MainActor in
+                        switch result {
+                        case .success:
+                            self.lastSavedMessage = "已保存到相册"
+                        case .failure(let error):
+                            self.lastSavedMessage = "保存失败:\(error.localizedDescription)"
+                        }
+                    }
                 }
             }
         }
