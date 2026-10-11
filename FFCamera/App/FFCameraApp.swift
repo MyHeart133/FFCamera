@@ -40,23 +40,11 @@ struct RootView: View {
     }
 }
 
-// MARK: - Camera (placeholder, M1)
+// MARK: - Camera
 
 struct CameraHomeView: View {
     var body: some View {
-        ZStack {
-            Theme.background.ignoresSafeArea()
-            VStack(spacing: 16) {
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 56, weight: .thin))
-                    .foregroundStyle(Theme.accent)
-                Text("相机模块")
-                    .font(.title2.weight(.semibold))
-                Text("M1 里程碑:AVFoundation 取景与拍摄")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
+        CameraScreenView()
     }
 }
 
