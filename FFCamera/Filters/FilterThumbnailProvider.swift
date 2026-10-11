@@ -1,40 +1,108 @@
 import CoreImage
 import UIKit
 
-/// 滤镜缩略图生成(基于内置渐变样图,结果缓存)。
+/// 滤镜缩略图:缓存 + 后台构建。
+/// 主线程调用永不阻塞:命中缓存直接返回;未命中先返回未调色底图,
+/// 并安排后台构建,完成后发通知刷新界面。
 enum FilterThumbnailProvider {
 
-    private static var cache: [String: UIImage] = [:]
-    private static let lock = NSLock()
+    /// 缩略图更新通知(FilterStripView 监听后刷新)。
+    static let didUpdate = Notification.Name("FFCamera.thumbnailsDidUpdate")
 
+    private static let lock = NSLock()
+    private static var cache: [String: UIImage] = [:]
+    private static var baseCache: [String: UIImage] = [:]
+    private static var inFlight: Set<String> = []
+
+    private static let buildQueue = DispatchQueue(label: "com.ffcamera.thumbnails", qos: .utility)
+
+    /// 任意线程可调;未就绪时立即返回底图,绝不等待。
     static func thumbnail(for spec: FilterSpec?, side: CGFloat = 96) -> UIImage {
-        let key = (spec?.id ?? "__original__") + "@\(Int(side))"
+        let key = cacheKey(spec, side)
+
         lock.lock()
-        defer { lock.unlock() }
         if let cached = cache[key] {
+            lock.unlock()
             return cached
         }
-        let base = baseImage(side: side)
-        let result: UIImage
-        if let spec {
-            result = FilterEngine.shared.apply(base, spec: spec, intensity: 1.0)
+        let shouldSchedule = !inFlight.contains(key)
+        if shouldSchedule {
+            inFlight.insert(key)
+            lock.unlock()
+            buildQueue.async {
+                let image = build(spec: spec, side: side)
+                lock.lock()
+                cache[key] = image
+                inFlight.remove(key)
+                lock.unlock()
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: didUpdate, object: nil)
+                }
+            }
         } else {
-            result = base
+            lock.unlock()
         }
-        cache[key] = result
-        return result
+        return baseImage(side: side)
     }
 
-    /// 预热全部缩略图(后台线程调用,避免首次展示时主线程停顿)。
+    /// 预热全部缩略图(后台执行;启动时调用一次)。
     static func warmUp() {
-        _ = thumbnail(for: nil)
-        for spec in FilterCatalog.all {
-            _ = thumbnail(for: spec)
+        buildQueue.async {
+            for spec in FilterCatalog.all {
+                let key = cacheKey(spec, 96)
+                lock.lock()
+                let skip = cache[key] != nil || inFlight.contains(key)
+                if !skip {
+                    inFlight.insert(key)
+                }
+                lock.unlock()
+                guard !skip else { continue }
+
+                let image = build(spec: spec, side: 96)
+                lock.lock()
+                cache[key] = image
+                inFlight.remove(key)
+                lock.unlock()
+            }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: didUpdate, object: nil)
+            }
         }
+    }
+
+    // MARK: - 内部
+
+    private static func cacheKey(_ spec: FilterSpec?, _ side: CGFloat) -> String {
+        (spec?.id ?? "__original__") + "@\(Int(side))"
+    }
+
+    private static func build(spec: FilterSpec?, side: CGFloat) -> UIImage {
+        let base = baseImage(side: side)
+        guard let spec else { return base }
+        return FilterEngine.shared.apply(base, spec: spec, intensity: 1.0)
+    }
+
+    /// 未调色底图(带缓存,只创建一次)。
+    static func baseImage(side: CGFloat) -> UIImage {
+        let key = "\(Int(side))"
+
+        lock.lock()
+        if let cached = baseCache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let image = makeBaseImage(side: side)
+
+        lock.lock()
+        baseCache[key] = image
+        lock.unlock()
+        return image
     }
 
     /// 上暖下冷的渐变样图,便于分辨调色差异。
-    private static func baseImage(side: CGFloat) -> UIImage {
+    private static func makeBaseImage(side: CGFloat) -> UIImage {
         let size = CGSize(width: side, height: side)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { context in

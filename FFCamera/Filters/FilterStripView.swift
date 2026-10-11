@@ -5,6 +5,7 @@ struct FilterStripView: View {
 
     @ObservedObject var camera: CameraController
     @State private var selectedSeries = 0
+    @State private var thumbTick = 0
 
     var body: some View {
         VStack(spacing: 10) {
@@ -13,6 +14,9 @@ struct FilterStripView: View {
             if camera.activeFilter != nil {
                 intensityRow
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: FilterThumbnailProvider.didUpdate)) { _ in
+            thumbTick += 1
         }
     }
 
