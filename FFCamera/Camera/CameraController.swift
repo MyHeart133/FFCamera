@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import UIKit
 
 /// 相机核心:权限、会话、拍照、变焦、前后摄切换。
@@ -21,6 +22,7 @@ final class CameraController: NSObject, ObservableObject {
     @Published var lastSavedMessage: String?
     @Published var activeFilter: FilterSpec?
     @Published var filterIntensity: CGFloat = 1.0
+    @Published var aiComposeEnabled = false
 
     let session = AVCaptureSession()
 
@@ -236,13 +238,25 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
         Task { @MainActor in
             let spec = self.activeFilter
             let intensity = self.filterIntensity
+            let aiCompose = self.aiComposeEnabled
             DispatchQueue.global(qos: .userInitiated).async {
-                let filtered = FilterEngine.shared.apply(image, spec: spec, intensity: intensity)
+                var working = image
+                var didCompose = false
+                if aiCompose,
+                   let ci = CIImage(image: image, options: [.applyOrientationProperty: true]) {
+                    let result = AutoComposer.composed(ci)
+                    if result.didCrop,
+                       let baked = FilterEngine.shared.context.createCGImage(result.image, from: result.image.extent) {
+                        working = UIImage(cgImage: baked)
+                        didCompose = true
+                    }
+                }
+                let filtered = FilterEngine.shared.apply(working, spec: spec, intensity: intensity)
                 PhotoLibrarySaver.save(filtered) { result in
                     Task { @MainActor in
                         switch result {
                         case .success:
-                            self.lastSavedMessage = "已保存到相册"
+                            self.lastSavedMessage = didCompose ? "AI 构图 · 已保存到相册" : "已保存到相册"
                         case .failure(let error):
                             self.lastSavedMessage = "保存失败:\(error.localizedDescription)"
                         }

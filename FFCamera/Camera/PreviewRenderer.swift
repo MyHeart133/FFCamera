@@ -17,6 +17,9 @@ final class PreviewRenderer: NSObject, ObservableObject {
     var filterIntensityValue: CGFloat = 1.0
     var mirroredPreview = false
 
+    /// 每帧回调(供 AI 分析消费;主队列调用)。
+    var onFrame: ((CVPixelBuffer) -> Void)?
+
     override init() {
         let metalDevice = MTLCreateSystemDefaultDevice()
         device = metalDevice
@@ -71,6 +74,8 @@ extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
         )
         commandBuffer.present(drawable)
         commandBuffer.commit()
+
+        onFrame?(pixelBuffer)
     }
 }
 

@@ -6,6 +6,7 @@ struct CameraScreenView: View {
 
     @StateObject private var camera = CameraController()
     @StateObject private var renderer = PreviewRenderer()
+    @StateObject private var analyzer = AICompositionAnalyzer()
     @State private var showGrid = true
     @State private var pinchBase: CGFloat = 1
     @State private var toast: String?
@@ -22,6 +23,9 @@ struct CameraScreenView: View {
         .statusBarHidden(true)
         .onAppear {
             syncRendererState()
+            renderer.onFrame = { buffer in
+                analyzer.ingest(buffer)
+            }
             camera.attachFrameReceiver(renderer)
             camera.startIfAuthorized()
         }
@@ -34,6 +38,12 @@ struct CameraScreenView: View {
         }
         .onChange(of: camera.isFrontCamera) { _, value in
             renderer.mirroredPreview = value
+        }
+        .onChange(of: camera.aiComposeEnabled) { _, value in
+            analyzer.isEnabled = value
+            if !value {
+                analyzer.reset()
+            }
         }
         .onChange(of: camera.lastSavedMessage) { _, message in
             guard let message else { return }
@@ -68,6 +78,9 @@ struct CameraScreenView: View {
                 previewSurface
                 if showGrid {
                     GridOverlay().ignoresSafeArea()
+                }
+                if camera.aiComposeEnabled {
+                    aiGuidanceLayer
                 }
             }
         case .unauthorized:
@@ -109,12 +122,40 @@ struct CameraScreenView: View {
             }
     }
 
+    @ViewBuilder
+    private var aiGuidanceLayer: some View {
+        if let guidance = analyzer.guidance {
+            GuidanceOverlayView(
+                guidance: guidance,
+                frameAspect: analyzer.frameAspect,
+                mirrored: camera.isFrontCamera
+            )
+            .ignoresSafeArea()
+        } else {
+            VStack {
+                Text("AI 构图 · 寻找主体")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.4), in: Capsule())
+                    .padding(.top, 64)
+                Spacer()
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     // MARK: - 控件
 
     private var controlLayer: some View {
         VStack {
             topBar
             Spacer()
+            if camera.aiComposeEnabled, !analyzer.recommendations.isEmpty {
+                recommendationRow
+                    .padding(.bottom, 10)
+            }
             FilterStripView(camera: camera)
                 .padding(.bottom, 12)
             zoomChips
@@ -141,7 +182,15 @@ struct CameraScreenView: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.85))
             Spacer()
-            Color.clear.frame(width: 38, height: 38)
+            Button {
+                camera.aiComposeEnabled.toggle()
+            } label: {
+                Text("AI")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(camera.aiComposeEnabled ? .black : .white)
+                    .frame(width: 38, height: 38)
+                    .background(camera.aiComposeEnabled ? Theme.accent : Color.black.opacity(0.35), in: Circle())
+            }
         }
         .padding(.top, 6)
     }
@@ -165,6 +214,35 @@ struct CameraScreenView: View {
     }
 
     private var zoomPresets: [CGFloat] { [1, 2, 3] }
+
+    private var recommendationRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.accent)
+                ForEach(analyzer.recommendations) { rec in
+                    Button {
+                        camera.activeFilter = rec.spec
+                        if camera.filterIntensity < 0.05 {
+                            camera.filterIntensity = 1.0
+                        }
+                    } label: {
+                        Text("\(rec.spec.name) · \(rec.reason)")
+                            .font(.system(size: 10))
+                            .lineLimit(1)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(.black.opacity(0.45), in: Capsule())
+                            .overlay(Capsule().stroke(Theme.accent.opacity(0.6), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
 
     private var bottomBar: some View {
         HStack {
