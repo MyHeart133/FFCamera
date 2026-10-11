@@ -11,12 +11,16 @@ final class PreviewRenderer: NSObject, ObservableObject {
 
     let device: MTLDevice?
 
+    /// 当前取景帧的实际分辨率(顶部展示,用于确认清晰度来源)。
+    @Published private(set) var sourceSize: CGSize?
+
     private let commandQueue: MTLCommandQueue?
     private let ciContext: CIContext?
 
     private let stateLock = NSLock()
     private var latestImage: CIImage?
     private var hasFreshFrame = false
+    private var lastSourceSize: CGSize = .zero
 
     // 界面同步的状态(主线程写,读宽容)。
     var activeFilterSpec: FilterSpec?
@@ -49,6 +53,17 @@ extension PreviewRenderer: AVCaptureVideoDataOutputSampleBufferDelegate {
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let frameSize = CGSize(
+            width: CVPixelBufferGetWidth(pixelBuffer),
+            height: CVPixelBufferGetHeight(pixelBuffer)
+        )
+        if frameSize != lastSourceSize {
+            lastSourceSize = frameSize
+            DispatchQueue.main.async { [weak self] in
+                self?.sourceSize = frameSize
+            }
+        }
 
         // 轻量:包 image、套滤镜图(未选滤镜时恒等),不做渲染。
         var image = CIImage(cvPixelBuffer: pixelBuffer)

@@ -176,9 +176,16 @@ struct CameraScreenView: View {
                     .background(showGrid ? Color.white : Color.black.opacity(0.35), in: Circle())
             }
             Spacer()
-            Text("FFCamera")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.85))
+            VStack(spacing: 2) {
+                Text("FFCamera")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                if let size = renderer.sourceSize {
+                    Text("\(Int(size.width))×\(Int(size.height))")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+            }
             Spacer()
             Button {
                 camera.aiComposeEnabled.toggle()

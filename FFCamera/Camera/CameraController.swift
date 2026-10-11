@@ -112,6 +112,8 @@ final class CameraController: NSObject, ObservableObject {
         videoInput = input
         currentDevice = device
 
+        configureDevice(device)
+
         guard session.canAddOutput(photoOutput) else {
             session.commitConfiguration()
             Log.camera.error("cannot add photo output")
@@ -119,9 +121,12 @@ final class CameraController: NSObject, ObservableObject {
             return
         }
         session.addOutput(photoOutput)
+        photoOutput.maxPhotoQualityPrioritization = .quality
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.deliversPreviewSizedOutputBuffers = false
+        videoOutput.automaticallyConfiguresOutputBufferDimensions = false
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
             if let connection = videoOutput.connection(with: .video),
@@ -152,6 +157,25 @@ final class CameraController: NSObject, ObservableObject {
 
     private func maxZoomFactor(for device: AVCaptureDevice) -> CGFloat {
         min(device.activeFormat.videoMaxZoomFactor, 6.0)
+    }
+
+    /// 连续自动对焦/曝光/白平衡(与原相机一致的基础行为)。
+    private func configureDevice(_ device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
+            device.unlockForConfiguration()
+        } catch {
+            Log.camera.error("device config failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - 切换镜头

@@ -62,14 +62,14 @@ struct FilterStripView: View {
             VStack(spacing: 5) {
                 Image(uiImage: FilterThumbnailProvider.thumbnail(for: spec))
                     .resizable()
-                    .frame(width: 46, height: 46)
+                    .frame(width: 52, height: 52)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(active ? Theme.accent : Color.white.opacity(0.25), lineWidth: active ? 2 : 1)
                     )
                 Text(title)
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundStyle(active ? .white : .white.opacity(0.65))
                     .lineLimit(1)
             }
@@ -79,9 +79,10 @@ struct FilterStripView: View {
 
     private var intensityRow: some View {
         HStack(spacing: 10) {
-            Image(systemName: "circle.lefthalf.filled")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.7))
+            Text(camera.activeFilter?.name ?? "")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 44, alignment: .leading)
             Slider(value: $camera.filterIntensity, in: 0...1)
                 .tint(Theme.accent)
             Text("\(Int((camera.filterIntensity * 100).rounded()))")
