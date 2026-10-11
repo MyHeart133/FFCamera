@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreImage
 import Foundation
 
 /// 实时 AI 构图分析器:节流消费相机帧,自动降采样后跑 Vision,产出主体框 / 构图引导 / 滤镜推荐。
