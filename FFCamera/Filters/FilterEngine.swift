@@ -45,7 +45,7 @@ final class FilterEngine {
         let mix = CIFilter.mix()
         mix.inputImage = filtered
         mix.backgroundImage = image
-        mix.inputAmount = Float(max(0, min(1, intensity)))
+        mix.amount = Float(max(0, min(1, intensity)))
         return mix.outputImage?.cropped(to: image.extent) ?? filtered
     }
 
