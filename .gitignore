@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode
+DerivedData/
+build/
+out/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.ipa
+
+# XcodeGen 生成物(用 `xcodegen generate` 重新生成)
+FFCamera.xcodeproj/
+
+# SwiftPM
+.swiftpm/
+Package.resolved
