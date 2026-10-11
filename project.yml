@@ -43,6 +43,10 @@ targets:
     platform: iOS
     sources:
       - path: FFCameraTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.ffcamera.app.tests
     dependencies:
       - target: FFCamera
 
